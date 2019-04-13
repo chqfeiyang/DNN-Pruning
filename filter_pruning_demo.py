@@ -9,6 +9,7 @@ os.environ['GLOG_minloglevel'] = '3'
 import os.path as osp
 import pickle
 import sys
+sys.path.insert(0, "/zte/ZTE2019/DNN-Pruning/caffe/python")
 from multiprocessing import Process, Queue
 
 import matplotlib.pyplot as plt

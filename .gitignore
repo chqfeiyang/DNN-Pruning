@@ -1,0 +1,3 @@
+caffe/
+lib/__pycache__
+temp/*.caffemodel
