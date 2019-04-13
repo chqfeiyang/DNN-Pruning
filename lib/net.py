@@ -98,7 +98,8 @@ class Net():
         self._points_dict_name = cfgs._points_dict_name
         if 0: self.show_acc('init')
 
-        self.WPQ={} # stores pruned values, which will be saved to caffemodel later (since Net couldn't be dynamically changed) -by Mario
+        # stores pruned values, which will be saved to caffemodel later (since Net couldn't be dynamically changed) -by Mario
+        self.WPQ = {}
         self.nonWPQ = {}
         self.bottoms2ch = []
         self.bnidx = []
@@ -1745,12 +1746,24 @@ class Net():
     def pruning_kernel(self, X, weights, d_prime, W2_name, Y):
         """
         Selects remaining filter after weight average  pruning
+
+        :param X:
+        :param weights: conv's weights
+        :param d_prime: remians channel num
+        :param W2_name: next convlayer name
+        :param Y:
+        :return:
+            newidxs: bool array, recording which channel in next conv will remian.
+            W2: next conv layer's new weights after pruning this conv layer.
         """
-        idxs = np.argsort(-np.abs(weights).sum((1,2,3)))
+        # sort by sum of the kernel weights' L1 norm
+        idxs = np.argsort(-np.abs(weights).sum((1, 2, 3)))
+        # choose the d_prime max kernel
         idxs = np.sort(idxs[:d_prime])
         #print("idxs:", idxs)
-        W2 = self.param_data(W2_name)[:,idxs,:,:]
-        if 1: print(W2_name)
+        W2 = self.param_data(W2_name)[:, idxs, :, :]
+        if 1:
+            print(W2_name)
         newidxs = np.zeros(len(weights)).astype(bool)
         newidxs[idxs] = True
         #print("newidxs",newidxs)

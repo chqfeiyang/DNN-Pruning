@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import print_function
 from easydict import EasyDict as edict
 from lib.cfgs import c as dcfgs
@@ -35,10 +36,10 @@ import caffe
 
 # ----- Main Functions ----
 
-def loadModel (pt, model, WPQ = None, selection = None):
+def loadModel (pt, model, WPQ=None, selection=None):
     """
     This function simply instantiates the net object
-    and returns the net objets.
+    and returns the net objects.
     """
 
     if DEBUG_Mario:
@@ -76,7 +77,7 @@ def setProto(net, prefix):
     """
     This is an auxiliary function that takes the pruned model, sets up the new .prototxt and extracts the WPQ dict
     (Actions taken by step4 used to be part of the net.R3 methods)
-     """
+    """
     if DEBUG_Mario:
         print("\n--- set Proto ---")
         print("in net's pt  ", net.pt_dir)
@@ -86,8 +87,9 @@ def setProto(net, prefix):
 
     if DEBUG_Mario:
         print("\nout pt (new_pt) : ", new_pt)
-        print("out WPQ  : ", WPQ.keys())
-
+        print("out WPQ  : ")
+        for k in WPQ:
+            print(k)
 
     return new_pt, WPQ
 
@@ -101,7 +103,9 @@ def saveModel(new_pt, model, WPQ):
         print("\n--- saveModel ---")
         print("in pt (new_pt): ", new_pt)
         print("in model: ", model)
-        print("in WPQ: ", WPQ.keys())
+        print("in WPQ: ")
+        for k in WPQ:
+            print(k)
 
     net = Net(new_pt, model=model)
     net.WPQ = WPQ
@@ -112,71 +116,83 @@ def saveModel(new_pt, model, WPQ):
         print("\nout pt (new_pt): ", new_pt)
         print("out model (new_model): ", new_model)
 
-    print('\nFinal model ready. For testing you can use:' )
-    print('\t$CAFFE_ROOT/build/tools/caffe test -model',new_pt, '-weights',new_model)
+    print('\nFinal model ready. For testing you can use:')
+    print('\t$CAFFE_ROOT/build/tools/caffe test -model', new_pt, '-weights', new_model)
     return new_pt, new_model
 
 # ----- Pruning Functions -----
 
-def pruneLayer(net, conv, convnext, bn , affine, dc):
+def pruneLayer(net, conv, convnext, bn, affine, dc):
+    """
+    pruning one layer's kernel and its next layer's channel in a net
 
-    conv_P = underline(conv,'P')
+    :param net:
+    :param conv: the convlayer waiting pruning
+    :param convnext: the convlayer after the waiting pruning convlayer
+    :param bn: the bnlayer might after conv
+    :param affine: the scalelayer might after bnlayer
+    :param dc: keeping channel nums
+    :return: One layer pruned net
+    """
+    conv_P = underline(conv, 'P')
     if DEBUG_Mario:
-        print("-"*30); print("\t Filter Pruning "); print("-"*30)
-        print("operating: conv = %s , convnext = %s, bn = %s, dc = %s" % (conv,convnext,bn,dc))
-
+        print("-"*30)
+        print("\t Filter Pruning ")
+        print("-"*30)
+        print("operating: conv = %s , convnext = %s, bn = %s, dc = %s" % (conv, convnext, bn, dc))
 
     if conv in net.selection:
         if DEBUG_Mario:
             print(" @  Pruning filter chanels (W2 from last iter) @")
-            print(" Reshape WPQ[(conv,0)] from: ",net.param_data(conv).shape )
-        net.WPQ[(conv_P,0)] =  net.param_data(conv)[:,net.selection[conv],:,:]
-        net.WPQ[(conv_P,1)] =  net.param_b_data(conv)
+            print(" Reshape WPQ[(conv,0)] from: ", net.param_data(conv).shape)
+        net.WPQ[(conv_P, 0)] = net.param_data(conv)[:, net.selection[conv], :, :]
+        net.WPQ[(conv_P, 1)] = net.param_b_data(conv)
         if DEBUG_Mario:
-            print("to:                          ",net.WPQ[(conv_P,0)].shape )
-            print("Biases shape: ",net.WPQ[(conv_P,1)].shape)
+            print("to:                          ", net.WPQ[(conv_P,0)].shape)
+            print("Biases shape: ", net.WPQ[(conv_P, 1)].shape)
     else:
-        net.WPQ[(conv_P,0)] =  net.param_data(conv)
-        net.WPQ[(conv_P,1)] =  net.param_b_data(conv)
+        net.WPQ[(conv_P, 0)] = net.param_data(conv)
+        net.WPQ[(conv_P, 1)] = net.param_b_data(conv)
         if DEBUG_Mario:
             print(" @ First iter(W2)  @")
-            print("shape of WPQ[(conv,0)] : ",net.WPQ[(conv_P,0)].shape )
-            print("shape of WPQ[(conv,1)] : ",net.WPQ[(conv_P,1)].shape )
-
+            print("shape of WPQ[(conv, 0)] : ", net.WPQ[(conv_P, 0)].shape)
+            print("shape of WPQ[(conv, 1)] : ", net.WPQ[(conv_P, 1)].shape)
 
     weights = net.param_data(conv)
-    idxs, W2, _ = net.pruning_kernel(None,weights, dc, convnext, None)
+    idxs, W2, _ = net.pruning_kernel(None, weights, dc, convnext, None)
 
     if DEBUG_Mario:
-            print("--- pruning_kernel() ret ---")
-            print("idxs" , idxs.shape)
-            print("W2" , W2.shape)
+            print("\n--- pruning_kernel() ret ---")
+            print("idxs", idxs.shape)
+            print("W2", W2.shape)
 
-    # W2
+    # Update W2(next conv layer)'s weights
+    # just set 0, not delete
     net.selection[convnext] = idxs
     net.param_data(convnext)[:, ~idxs, ...] = 0
     net.param_data(convnext)[:, idxs, ...] = W2.copy()
 
-
     if DEBUG_Mario:
-        print("@ Set W2 @")
+        print("\n@ Set W2 @")
         print("weights convnext that are set to zero: ", net.param_data(convnext)[:, ~idxs, ...].shape)
         print("weights convnext that are retained   : ", net.param_data(convnext)[:, idxs, ...].shape)
         print("weights covnext in model             : ", net.param_data(convnext).shape)
 
-
-    # W1
-    net.WPQ[(conv_P,0)] = net.WPQ[(conv_P,0)][idxs]
-    net.WPQ[(conv_P,1)] = net.WPQ[(conv_P,1)][idxs]
-    net.set_conv(conv, num_output=sum(idxs),new_name=conv_P)
+    # Update W1(this conv layer)'s weights
+    net.WPQ[(conv_P, 0)] = net.WPQ[(conv_P, 0)][idxs]
+    net.WPQ[(conv_P, 1)] = net.WPQ[(conv_P, 1)][idxs]
+    # TODO: read this function(net.set_conv)
+    net.set_conv(conv, num_output=sum(idxs), new_name=conv_P)
     if DEBUG_Mario:
-        print("@ Prune filters W1 @")
-        print("net.WPQ[(conv,0)] ",net.WPQ[(conv_P,0)].shape)
-        print("net.WPQ[(conv,1)] ",net.WPQ[(conv_P,1)].shape)
+        print("\n@ Prune filters W1 @")
+        print("net.WPQ[(conv,0)] ", net.WPQ[(conv_P, 0)].shape)
+        print("net.WPQ[(conv,1)] ", net.WPQ[(conv_P, 1)].shape)
 
-   # W1's BN
+    # W1's BN
+    # delete the bn and scale layers' channel as convnext
+    # however, the bn and scale layer still exits.
     if bn is not None:
-        bn_P = underline(bn,'P')
+        bn_P = underline(bn, 'P')
         net.WPQ[bn_P] = net.param_data(bn)[idxs]
         net.set_bn(bn, new_name=bn_P)
 
@@ -185,7 +201,7 @@ def pruneLayer(net, conv, convnext, bn , affine, dc):
         net.set_bn(affine, new_name=affine_P)
 
         if DEBUG_Mario:
-            print("@ Prune BN layer between %s and %s @" %(conv,convnext))
+            print("\n@ Prune BN layer between %s and %s @" %(conv,convnext))
             print("net.WPQ[bn_P] ", net.WPQ[bn_P].shape)
             print("net.WPQ[affine_P] ", net.WPQ[affine_P].shape)
 
@@ -194,19 +210,20 @@ def pruneLayer(net, conv, convnext, bn , affine, dc):
 def pruneLastLayer(net,conv, bn, affine, dc):
 
     if DEBUG_Mario:
-        print("-"*30); print("\t Filter Pruning  "); print("-"*30)
-        print("Last run, operating: conv = %s , bn = %s, dc = %s" % (conv,bn,dc))
-    conv_P = underline(conv,'P')
+        print("-"*30)
+        print("\t Filter Pruning  ")
+        print("-"*30)
+        print("Last run, operating: conv = %s , bn = %s, dc = %s" % (conv, bn, dc))
+    conv_P = underline(conv, 'P')
 
     if DEBUG_Mario:
-            print(" @  Pruning filter chanels (W2 from last iter) @")
-            print(" Reshape WPQ[(conv,0)] from: ",net.param_data(conv).shape )
-    net.WPQ[(conv_P,0)] =  net.param_data(conv)[:,net.selection[conv],:,:]
-    net.WPQ[(conv_P,1)] =  net.param_b_data(conv)
+            print(" @  Pruning filter channels (W2 from last iter) @")
+            print(" Reshape WPQ[(conv, 0)] from: ", net.param_data(conv).shape)
+    net.WPQ[(conv_P, 0)] = net.param_data(conv)[:, net.selection[conv], :, :]
+    net.WPQ[(conv_P, 1)] = net.param_b_data(conv)
     if DEBUG_Mario:
-        print("to:                          ",net.WPQ[(conv_P,0)].shape )
-        print("Biases shape: ",net.WPQ[(conv_P,1)].shape)
-
+        print("to:                          ", net.WPQ[(conv_P, 0)].shape)
+        print("Biases shape: ", net.WPQ[(conv_P, 1)].shape)
 
     if not noLastConv:
         weights = net.param_data(conv)
@@ -221,7 +238,7 @@ def pruneLastLayer(net,conv, bn, affine, dc):
         net.WPQ[(conv_P,1)] = net.WPQ[(conv_P,1)][newidxs]
         net.set_conv(conv, num_output=sum(newidxs),new_name=conv_P)
         if DEBUG_Mario:
-            print("@ Prune filters W1 @")
+            print("\n@ Prune filters W1 @")
             print("net.WPQ[(conv,0)] ",net.WPQ[(conv_P,0)].shape)
             print("net.WPQ[(conv,1)] ",net.WPQ[(conv_P,1)].shape)
 
@@ -244,8 +261,9 @@ def pruneLastLayer(net,conv, bn, affine, dc):
             print("-"*30); print("\t Prune first FC layer "); print("-"*30)
 
         FCs = net.innerproduct
-        fc = FCs[0] # get the nae of the first FC layer
-        fc_P = underline(fc,'P')
+        # get the name of the first FC layer
+        fc = FCs[0]
+        fc_P = underline(fc, 'P')
         fc_bottom_shape = prune_me.blobs_shape(prune_me.layer_bottom(fc))
         if len(fc_bottom_shape) == 4:
             unit_serial_len = fc_bottom_shape[2] * fc_bottom_shape[3]
@@ -263,7 +281,7 @@ def pruneLastLayer(net,conv, bn, affine, dc):
             print('@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@')
             fc_newidxs = newidxs
 
-        net.WPQ[fc_P] = net.param_data(fc)[:,fc_newidxs]
+        net.WPQ[fc_P] = net.param_data(fc)[:, fc_newidxs]
         net.set_fc(fc, new_name=fc_P)
         if DEBUG_Mario:
                 print("@ Prune inputs of %s layer  @" % fc)
@@ -277,19 +295,29 @@ def pruneLastLayer(net,conv, bn, affine, dc):
 # ----- Auxiliary Functions -----
 
 def loadConfigs(pt, model):
+    """
+    confirming the convs' output channels you want to keep.
 
+    :param pt: prototxt file.
+    :param model: caffemodel file.
+    :return: A dict including the conv layers and their keeping channel nums.
+    """
     if DEBUG_Mario:
          print("\n--- load configs ---")
          print("in pt:", pt)
          print("in model:", model)
 
+    # dcdic holds the number of retained channels
+    # maybe need modify by yourself if use your own model.
     dcdic = dcfgs.dcdic
+    dcdic = sorted(dcdic, key=lambda a, b: 1 if a[0] > b[0] else -1)
     print("\nCurrent pruning configuration (loaded from lib/cfgs.c.dcdic)")
-    for key,value in dcdic.items():
-        print(key,value)
+    for key, value in dcdic.items():
+        print(key, value)
 
-    changeConfigs= checkOperation(question= '\nModify the prunig configuration?',default='no')
+    changeConfigs = checkOperation(question= '\nModify the prunig configuration?',default='no')
 
+    # Change the nums of output channels need remaining of the model.
     if changeConfigs:
         net = Net(pt, model=model, phase=caffe.TEST)
         convs = net.convs
@@ -304,6 +332,13 @@ def loadConfigs(pt, model):
     return dcdic
 
 def checkOperation(question = 'Pass a question string to checkOperation!', default='no'):
+    """
+    An Interface function, return the answer(True or False) of input question.
+
+    :param question:
+    :param default:
+    :return: True or False
+    """
 
     valid = {"yes": True, "y": True, "ye": True,
              "no": False, "n": False}
@@ -328,33 +363,48 @@ def checkOperation(question = 'Pass a question string to checkOperation!', defau
                              "(or 'y' or 'n').\n")
 
 def registerBNs(net):
-    BNs = net.bns#list with name of the BatchNorm layers
+    """
+    Collect the batchnorm information in net.
+
+    :param net: A Net object.
+    :return:
+        net: the same as input, make the flag net.noBNs(whether there is any BN in net) active.
+        BNs_dic: Dict, key is the bn bottom's layer name, value is a list(bn_layer_name, scale_layer_name).
+    """
+    # list with name of the BatchNorm layers
+    BNs = net.bns
+    # list with name of the Scale layers
     Affines = net.affines
+    # list with name of the FullConnect layers
     FCs = net.innerproduct
+
     assert len(BNs) == len(Affines)
 
     if not BNs:
         print("no BN layers found in %s" % net.pt_dir)
-        net.noBNs = True #there is no BN layers
+        # there is no BN layers
+        net.noBNs = True
         BNs_dic = None
     else:
         print("BN layers found in %s" % net.pt_dir)
         net.noBNs = False
         BNs_dic = {}
         for BN, Affine in zip(BNs,Affines):
-            BN_bottom= net.bottom_names[BN][0] # of name of the bottoms of each BN layers
+            # of name of the bottoms of each BN layers
+            BN_bottom = net.bottom_names[BN][0]
             if BN_bottom not in FCs:
-                BNs_dic[BN_bottom] = [BN,Affine] # dictionary that holdes bottom and name of each BN and scale layer
+                # dictionary that holdes bottom and name of each BN and scale layer
+                BNs_dic[BN_bottom] = [BN, Affine]
 
         if DEBUG_Mario:
-            for key,value in BNs_dic.items():
-                print(key,value)
-
+            for key, value in BNs_dic.items():
+                print(key, value)
 
     return net, BNs_dic
 
 def checkIfBN(noBNs, conv, bns_dic):
-    if not noBNs: #if there is BN layers in the Net
+    # if there is BN layers in the Net
+    if not noBNs:
         try:
             bn = bns_dic[conv][0]
             affine = bns_dic[conv][1]
@@ -367,11 +417,15 @@ def checkIfBN(noBNs, conv, bns_dic):
         return None, None
 
 def parseArgs():
+    """
+    Get the args, including 'model' and 'weights'.
+    :return: A parser, including 2 params, model(default: None) and weights(default: None)
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument('-model', help='prototxt directory', default=None, type=str)
     parser.add_argument('-weights', help='caffemodel directory', default=None, type=str)
 
-    if len(sys.argv)==1:
+    if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)
 
@@ -539,7 +593,14 @@ def pseudoPruneLastLayer(net,conv, bn, affine, dc):
 
     return net
 
-def accuracy(net,n_batches):
+def accuracy(net, n_batches):
+    """
+    calculate the accuracy.
+
+    :param net: our module, A Net object.
+    :param n_batches: forward times.
+    :return: the mean acc1 and acc5.
+    """
     acc1 = []
     acc5 = []
     for i in range(n_batches):
@@ -711,50 +772,60 @@ def sensitivityScore(graph_title):
 if __name__ == '__main__':
 
     DEBUG_Mario = 1
+    # Get the model(prototxt) and weights(caffemodel).
     args = parseArgs()
+    # Whether to pruning the last convlayer, default: False
     noLastConv = dcfgs.noLastConv
 
+    #    pt: name string of the prototxt file
+    # model: name string of the caffemodel file
     pt = args.model
     model = args.weights
 
+    # prune_mode: True(deafult) or False
     prune_mode = checkOperation(question='Prune model? [Type YES to continue or NO to plot sensitivity] ',default='yes')
 
     if prune_mode:# Prune Model
         print("\nOperation mode: Pruning")
 
+        # dcdic is a dict including the conv layers and their keeping channel nums.
         dcdic = loadConfigs(pt, model)
 
-        prune_me = loadModel(pt,model)
+        # Instantial model by class Net
+        prune_me = loadModel(pt, model)
+        # convs is a string list, default contains all the conv layers' name.
         convs = prune_me.convs
 
+        # Get the acc1 and acc5 results.
         test_n_batches = 50
-        gt_acc1 , gt_acc5 = accuracy(prune_me, test_n_batches )
+        gt_acc1, gt_acc5 = accuracy(prune_me, test_n_batches)
 
+        # This seems not suit resnet. needs modify.
         print("\nPairs of layers that will be pruned:")
         for conv, convnext in zip(convs[0:], convs[1:]):
-            print(conv,convnext)
+            print(conv, convnext)
 
         proceed = checkOperation("\ncontinue? ", default='no')
         if not proceed: sys.exit()
 
         prune_me, BNs_dic = registerBNs(prune_me)
 
+        # pruning the whole layer
         for conv, convnext in zip(convs[0:], convs[1:]):
 
+            # check if there is batchnorm layer after conv layer, if True, return its name, else return None.
             bn, affine = checkIfBN(prune_me.noBNs, conv, BNs_dic)
+            # dc is the keep channel nums.
             dc = dcdic[conv]
-
 
             #prune a hidden layer
             prune_me = pruneLayer(prune_me, conv, convnext, bn, affine, dc)
 
-            ######################################################
+            ################################################################
             #finetune after each layer pruning?
             #TODO: Quck fine-tuning after layer pruning
-            #NOTE: In the paper they prune the hold model before
-            #finetuning
-            ######################################################
-
+            #NOTE: In the paper they prune the hold model before finetuning
+            ################################################################
 
             #prune last layer (the standard pruneLayer() function omits this layer)
             if convnext == convs[-1]:
@@ -764,10 +835,11 @@ if __name__ == '__main__':
 
                 prune_me = pruneLastLayer(prune_me, convnext, bn, affine, dc)
 
-        new_pt, WPQ = setProto(prune_me,prefix='renamed')
+        # save pruned net in new prototxt
+        new_pt, WPQ = setProto(prune_me, prefix='renamed')
 
         #save the final .caffemodel
-        new_pt, new_model = saveModel( new_pt, model, WPQ )
+        new_pt, new_model = saveModel(new_pt, model, WPQ)
 
         #Load the pruned model for testing
         print("\n runing accuracy test of the pruned model (%d test batches)" % test_n_batches)
